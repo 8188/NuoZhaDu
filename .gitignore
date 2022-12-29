@@ -1,0 +1,10 @@
+model_new/
+.vscode/
+__pycache__/
+logs/
+.ipynb_checkpoints/
+.VSCodeCounter/
+build/
+*.ipynb
+*.c
+*.html
