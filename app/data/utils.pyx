@@ -19,6 +19,7 @@ from config import Config
 from app.data.models import Timer, Counter, Alarm
 from app import redis_client
 from app.data.parameters import Constant
+from app import logger
 cimport cython
 from cython.parallel cimport prange
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -122,6 +123,7 @@ cpdef calculate_open_close_time(int unit):
             close_time = (close_time2 - close_time1) / np.timedelta64(1, "s")
 
             if close_time > timedelta(seconds=Constant.MIN_CLOSE_TIME):
+                logger.info(f"CV{unit} Closed")
                 retro = calculate_retroegulation(unit, close_time1, close_time2)
                 with DBSession() as session:
                     session.add_all(
@@ -159,6 +161,7 @@ cpdef calculate_open_close_time(int unit):
             open_time = (open_time2 - open_time1) / np.timedelta64(1, "s")
 
             if open_time > timedelta(seconds=Constant.MIN_OPEN_TIME):
+                logger.info(f"CV{unit} Opened")
                 retro = calculate_retroegulation(unit, open_time1, open_time2)
                 with DBSession() as session:
                     session.add_all(
@@ -283,7 +286,7 @@ cdef list get_relay_displacement(int unit, str event):
     """
     cdef str table = "timer"
     cdef str columns = "*"
-    cdef str term = f"where info = 'cv{unit}_{event}' order by time desc limit 11"
+    cdef str term = f"where info = 'cv{unit}_{event}' order by time desc limit {Constant.RELAY_DISPLACEMENT_LIMIT}"
 
     df = get_data_from_db(table, columns, term)
     df["start_time"] = df["time"] - pd.to_timedelta(df["val"], unit="s")
@@ -365,9 +368,10 @@ cdef goodness_of_fit(int unit, str event):
             # 分布间距离
             job4 = pool.submit(stats.wasserstein_distance, curve_now, curve_history)
 
-            E_GOF.append(job1.result())
+            # E方越接近1越好, 取倒数统一成越小越好，方便前端展示
+            E_GOF.append(1 / job1.result())
             RMSE.append(job2.result())
-            KSTest.append(job3.result().pvalue) # 大于0.05则拒绝0假设
+            KSTest.append(1 / job3.result().pvalue) # 大于0.05则拒绝0假设
             WD.append(job4.result())
 
     # for curve_history in dfs[1:]:
@@ -378,7 +382,7 @@ cdef goodness_of_fit(int unit, str event):
 
     cdef dict data = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
-        "key": ["拟合度E", "均方根误差", "KS检验", "Wasserstein距离"],
+        "key": ["1/拟合度E", "均方根误差", "1/KS检验", "Wasserstein距离"],
         "value": [E_GOF, RMSE, KSTest, WD]
     }
 
@@ -644,7 +648,7 @@ cdef get_health_df(int unit):
 cdef double zscore_test(df) except ? -1:
     """标准分数
     与均值超过3个标准差则认为是异常点
-    每列异常点多于3%则认为改列异常,返回异常列的比例
+    每列异常点多于3%则认为该列异常,返回异常列的比例
     """
     cdef np.ndarray[np.double_t, ndim=2] zs = stats.zscore(df, axis=1, nan_policy="omit").values
 
@@ -653,7 +657,7 @@ cdef double zscore_test(df) except ? -1:
 
 cdef double oneway_anova_test(df) except ? -1:
     """单因素方差分析,组间两两差异
-    检测半天时间的组间均值差异,pvalue>0.05则接收零假设,差异不明显
+    检测半天时间的组间均值差异,pvalue>0.05则接受零假设,差异不明显
     和turkey test类似,turkey test可以知道两个分组对整体差异的贡献度
     返回差异列的比例
     """
@@ -739,7 +743,7 @@ cdef double lscp(df) except ? -1:
 
 
 cdef double spectral_residual_saliency(df) except ? -1:
-    """ 残差谱显著性分析,异常分数>99分数
+    """ 残差谱显著性分析,异常分数>99分位数
     返回异常列的比例
     """
     import sranodec as anom

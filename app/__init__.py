@@ -4,8 +4,7 @@ from flask_mqtt import Mqtt
 from flask_apscheduler import APScheduler as _BaseAPScheduler
 from flask_redis import FlaskRedis
 from flask_cors import CORS
-import logging
-from logging.handlers import RotatingFileHandler
+from loguru import logger
 import os
 import warnings
 warnings.filterwarnings("ignore")
@@ -20,7 +19,7 @@ class APScheduler(_BaseAPScheduler):
 scheduler = APScheduler()
 
 
-def scheduler_start(app):
+def scheduler_start():
     """ 多进程进行部署，定时任务会重复启动 """
     import platform
     import atexit
@@ -31,13 +30,17 @@ def scheduler_start(app):
         try:
             fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
             scheduler.start()
-            app.logger.debug('Scheduler Started,---------------')
+            logger.info("Scheduler Started")
         except:
-            pass
+            logger.error("Scheduler Failed to Start")
  
         def unlock():
-            fcntl.flock(f, fcntl.LOCK_UN)
-            f.close()
+            try:
+                fcntl.flock(f, fcntl.LOCK_UN)
+                f.close()
+                logger.info("Lock Released")
+            except:
+                logger.error("Lock Failed to Release")
 
         atexit.register(unlock)
     else:
@@ -46,16 +49,17 @@ def scheduler_start(app):
         try:
             msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
             scheduler.start()
-            app.logger.debug('Scheduler Started,----------------')
+            logger.info("Scheduler Started")
         except:
-            pass
+            logger.error("Scheduler Failed to Start")
  
         def _unlock_file():
             try:
                 f.seek(0)
                 msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                logger.info("Lock Released")
             except:
-                pass
+                logger.error("Lock Failed to Release")
  
         atexit.register(_unlock_file)
 
@@ -70,9 +74,6 @@ def create_app():
 
     cors.init_app(app, supports_credentials=True) # 允许跨域请求
 
-    scheduler.init_app(app)
-    scheduler_start(app)
-
     mqtt_client.init_app(app)
     redis_client.init_app(app)
 
@@ -80,23 +81,23 @@ def create_app():
     app.register_blueprint(main_bp)
 
     from app.api import bp as api_bp
-    app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(api_bp, url_prefix="/api")
 
     if not app.debug and not app.testing:
         if not os.path.exists(Config.LOG_FILE_PATH):
             os.mkdir(Config.LOG_FILE_PATH)
-        file_handler = RotatingFileHandler(
-            Config.LOG_FILE_PATH + Config.LOG_FILE_NAME,
-            maxBytes=Config.LOG_FILE_SIZE,
-            backupCount=Config.LOG_FILE_SUM
-        )
-        file_handler.setFormatter(logging.Formatter(
-            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-        ))
-        file_handler.setLevel(logging.INFO)
-        app.logger.addHandler(file_handler)
 
-        app.logger.setLevel(logging.INFO)
-        app.logger.info(Config.LOG_FILE_START)   
+        logger.add(
+            Config.LOG_FILE_PATH + Config.LOG_FILE_NAME,
+            level=Config.LOG_LEVEL,
+            rotation=Config.LOG_FILE_SIZE,
+            retention=Config.LOG_FILE_SUM
+        )
+
+        print(Config.LOG_FILE_START)
+        logger.info("NUOZHADU MICROSERVER START")
+
+    scheduler.init_app(app)
+    scheduler_start()
 
     return app

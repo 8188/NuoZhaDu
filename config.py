@@ -9,7 +9,7 @@ load_dotenv(os.path.join(basedir, '.env'))
 def task1_jobs(num):
     return {
         'id': f'task1_job{num}', 
-        'func': 'app.data.data_make:task1', 
+        'func': 'app.data.tasks:task1', 
         'args': (num,), 
         'trigger': 'interval',
         'seconds': 10,
@@ -21,7 +21,7 @@ def task1_jobs(num):
 def task2_jobs(num):
     return {
         'id': f'task2_job{num}', 
-        'func': 'app.data.data_make:task2', 
+        'func': 'app.data.tasks:task2', 
         'args': (num,), 
         'trigger': 'interval',
         'seconds': 60,
@@ -33,7 +33,8 @@ def task2_jobs(num):
 class Config(object):
     LOG_FILE_PATH = 'logs/'
     LOG_FILE_NAME = 'NUOZHADU.log'
-    LOG_FILE_SIZE = 1024000 # 1000kb
+    LOG_LEVEL = "INFO"
+    LOG_FILE_SIZE = '10 MB' # 1024000
     LOG_FILE_SUM = 10
 
     user = os.getenv('MYSQL_USER')
