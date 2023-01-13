@@ -7,5 +7,18 @@ services:
       - "8990:8990"
     environment:
       - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
+      - MQTT_BROKER_URL=mqtt
     extra_hosts:
       - host.docker.internal:host-gateway
+    depends_on:
+      - redis
+      - mqtt
+  redis:
+    image: redis
+    expose:
+      - 6379 
+  mqtt:
+    image: emqx
+    expose:
+      - 1883

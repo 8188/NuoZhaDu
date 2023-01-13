@@ -2,6 +2,7 @@ from flask import Flask
 from config import Config
 from flask_mqtt import Mqtt
 from flask_apscheduler import APScheduler as _BaseAPScheduler
+from sqlalchemy import create_engine
 from flask_redis import FlaskRedis
 from flask_cors import CORS
 from loguru import logger
@@ -19,8 +20,10 @@ class APScheduler(_BaseAPScheduler):
 scheduler = APScheduler()
 
 
-def scheduler_start():
-    """ 多进程进行部署，定时任务会重复启动 """
+def scheduler_lock():
+    """ 多进程进行部署，定时任务会重复启动 
+    参考: https://blog.csdn.net/u014595589/article/details/105083571
+    """
     import platform
     import atexit
 
@@ -39,6 +42,7 @@ def scheduler_start():
                 fcntl.flock(f, fcntl.LOCK_UN)
                 f.close()
                 logger.info("Lock Released")
+                print("--------------------------Good Bye--------------------------")
             except:
                 logger.error("Lock Failed to Release")
 
@@ -58,12 +62,14 @@ def scheduler_start():
                 f.seek(0)
                 msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
                 logger.info("Lock Released")
+                print("--------------------------Good Bye--------------------------")
             except:
                 logger.error("Lock Failed to Release")
  
         atexit.register(_unlock_file)
 
 mqtt_client = Mqtt()
+engine = create_engine(Config.MYSQL_DATABASE_URI)
 redis_client = FlaskRedis()
 cors = CORS()
 
@@ -94,10 +100,10 @@ def create_app():
             retention=Config.LOG_FILE_SUM
         )
 
-        print(Config.LOG_FILE_START)
+        print(Config.START_LOGO)
         logger.info("NUOZHADU MICROSERVER START")
 
     scheduler.init_app(app)
-    scheduler_start()
+    scheduler_lock()
 
     return app

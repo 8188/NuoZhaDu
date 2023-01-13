@@ -13,11 +13,9 @@ import pandas as pd
 import json
 from functools import reduce
 from datetime import datetime, timedelta
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from config import Config
 from app.data.models import Timer, Counter, Alarm
-from app import redis_client
+from app import redis_client, engine
 from app.data.parameters import Constant
 from app import logger
 cimport cython
@@ -47,7 +45,6 @@ cv8_pump1_time1 = cv8_pump2_time1 = cv8_pump3_time1 = \
 cv9_pump1_time1 = cv9_pump2_time1 = cv9_pump3_time1 = \
 pd.to_datetime(datetime.now())
 
-engine = create_engine(Config.SQLALCHEMY_DATABASE_URI)
 
 cdef get_data_from_db(str table, str columns, str term=""):
     if not term:
@@ -62,16 +59,17 @@ cdef get_data_from_db(str table, str columns, str term=""):
 
 cdef tuple calculate_retroegulation(int unit, begin, end):
     """统计6个接力器反调次数"""
-    cdef int retro1 = 0
-    cdef int retro2 = 0
-    cdef int retro3 = 0
-    cdef int retro4 = 0
-    cdef int retro5 = 0
-    cdef int retro6 = 0
+    cdef:
+        int retro1 = 0
+        int retro2 = 0
+        int retro3 = 0
+        int retro4 = 0
+        int retro5 = 0
+        int retro6 = 0
 
-    cdef str table = f"cv{unit}_digital_1s_" + datetime.today().strftime("%Y%m%d")
-    cdef str columns = "ALM_SMPOS1_ERR, ALM_SMPOS2_ERR, ALM_SMPOS3_ERR, ALM_SMPOS4_ERR, ALM_SMPOS5_ERR, ALM_SMPOS6_ERR"
-    cdef str term = f"where time >= '{begin}' and time <= '{end}'"
+        str table = f"cv{unit}_digital_1s_" + datetime.today().strftime("%Y%m%d")
+        str columns = "ALM_SMPOS1_ERR, ALM_SMPOS2_ERR, ALM_SMPOS3_ERR, ALM_SMPOS4_ERR, ALM_SMPOS5_ERR, ALM_SMPOS6_ERR"
+        str term = f"where time >= '{begin}' and time <= '{end}'"
 
     df = get_data_from_db(table, columns, term)
 
@@ -98,18 +96,18 @@ cdef tuple calculate_retroegulation(int unit, begin, end):
 
 
 cpdef calculate_open_close_time(int unit):
-    """计算球阀开关机时间, 反调次数统计,电磁阀超时判定也放在开关完筒阀后执行"""
+    """计算球阀开关机时间, 反调次数统计,电磁阀超时计算,曲线拟合度计算也放在开关完筒阀后执行"""
+    cdef:
+        str table = f"cv{unit}_digital_0s_" + datetime.today().strftime("%Y%m%d")
+        str columns = "time, RINGGATE_CLOSED, RINGGATE_OPENNED"
 
-    cdef str table = f"cv{unit}_digital_0s_" + datetime.today().strftime("%Y%m%d")
-    cdef str columns = "time, RINGGATE_CLOSED, RINGGATE_OPENNED"
+        str closed = ""
+        str opened = ""
+        tuple retro = ()
 
     df = get_data_from_db(table, columns)
 
     DBSession = sessionmaker(bind=engine)
-
-    cdef str closed = ""
-    cdef str opened = ""
-    cdef tuple retro = ()
 
     for t, closed, opened in zip(
         df["time"], df["RINGGATE_CLOSED"], df["RINGGATE_OPENNED"]
@@ -193,30 +191,31 @@ cpdef calculate_open_close_time(int unit):
 # 用cpdef,否则多线程重定义,bug?
 cpdef statistics_timer(int unit, str obj):
     """计算各统计量
-    obj -> str: pump1/2/3, open, close
+    obj -> str: pump1/2, open, close
     topic -> cv{unit}_{obj}: cv1_close/pump1
     """
-    cdef str table = "timer"
-    cdef str columns = "*"
-    cdef str term = f"where info = 'cv{unit}_{obj}' order by time desc limit {Constant.TIMER_DATA_LIMIT}"
+    cdef:
+        str table = "timer"
+        str columns = "*"
+        str term = f"where info = 'cv{unit}_{obj}' order by time desc limit {Constant.TIMER_DATA_LIMIT}"
 
     df = get_data_from_db(table, columns, term)
 
-    cdef double mean_diff = -np.diff(df["time"]).mean() / np.timedelta64(1, "s")
-    cdef int max_ = max(df["val"])
-    cdef int min_ = min(df["val"])
-    cdef double mean = np.mean(df["val"])
-    cdef list timestamp = [df["time"][i].strftime("%Y-%m-%d %H:%M:%S.%f") for i in range(len(df))]
-    cdef list val = df["val"].tolist()
-
-    cdef dict data = {
-        "timestamp": timestamp,
-        "value": val,
-        "mean_diff": mean_diff,
-        "max": max_,
-        "min": min_,
-        "mean": mean,
-    }
+    cdef:
+        double mean_diff = -np.diff(df["time"]).mean() / np.timedelta64(1, "s")
+        int max_ = max(df["val"])
+        int min_ = min(df["val"])
+        double mean = np.mean(df["val"])
+        list timestamp = [df["time"][i].strftime("%Y-%m-%d %H:%M:%S.%f") for i in range(len(df))]
+        list val = df["val"].tolist()
+        dict data = {
+            "timestamp": timestamp,
+            "value": val,
+            "mean_diff": mean_diff,
+            "max": max_,
+            "min": min_,
+            "mean": mean,
+        }
 
     redis_client.hset(f"cv{unit}", obj, json.dumps(data))
 
@@ -226,36 +225,37 @@ cdef statistics_retro(int unit, str event):
     event -> str: open, close
     topic -> cv{unit}_retro_{event}: cv1_retro_close
     """
-    cdef str table = "counter"
-    cdef str columns = "*"
-    cdef str term = f"where info like '%%{event}' order by time desc limit {Constant.RETRO_DATA_LIMIT}"
+    cdef:
+        str table = "counter"
+        str columns = "*"
+        str term = f"where info like '%%{event}' order by time desc limit {Constant.RETRO_DATA_LIMIT}"
 
     df = get_data_from_db(table, columns, term)
 
     df = pd.pivot_table(df, values="val", index="time", columns="info")
 
-    cdef list max_ = np.max(df, axis=0).tolist()
-    cdef list min_ = np.min(df, axis=0).tolist()
-    cdef list mean = np.mean(df, axis=0).tolist()
-    cdef list timestamp = [str(df.index[i]) for i in range(len(df))]
-    cdef list val = df.values.tolist() # 二维数组需先提取values再转list
-    cdef list keys = [
-        f"cv{unit}_retro1_{event}", 
-        f"cv{unit}_retro2_{event}", 
-        f"cv{unit}_retro3_{event}", 
-        f"cv{unit}_retro4_{event}", 
-        f"cv{unit}_retro5_{event}", 
-        f"cv{unit}_retro6_{event}", 
-    ]
-
-    cdef dict data = {
-        "timestamp": timestamp,
-        "key": keys,
-        "value": val,
-        "max": max_,
-        "min": min_,
-        "mean": mean,
-    }
+    cdef:
+        list max_ = np.max(df, axis=0).tolist()
+        list min_ = np.min(df, axis=0).tolist()
+        list mean = np.mean(df, axis=0).tolist()
+        list timestamp = [str(df.index[i]) for i in range(len(df))]
+        list val = df.values.tolist() # 二维数组需先提取values再转list
+        list keys = [
+            f"cv{unit}_retro1_{event}", 
+            f"cv{unit}_retro2_{event}", 
+            f"cv{unit}_retro3_{event}", 
+            f"cv{unit}_retro4_{event}", 
+            f"cv{unit}_retro5_{event}", 
+            f"cv{unit}_retro6_{event}", 
+        ]
+        dict data = {
+            "timestamp": timestamp,
+            "key": keys,
+            "value": val,
+            "max": max_,
+            "min": min_,
+            "mean": mean,
+        }
     
     redis_client.hset(f"cv{unit}", f"retro_{event}", json.dumps(data))
 
@@ -264,15 +264,14 @@ cdef statistics_overtime(int unit):
     """电磁阀超时次数统计
     topic -> cv{unit}_overtime: cv1_overtime
     """
-    cdef str table = "alarm"
-    cdef str columns = "info, count(info)"
-    cdef str term = f"where info like 'cv{unit}%%' and time >= now() - interval {Constant.OVERTIME_DATA_INTERVAL_DAYS} day group by info"
+    cdef:
+        str table = "alarm"
+        str columns = "info, count(info)"
+        str term = f"where info like 'cv{unit}%%' and time >= now() - interval {Constant.OVERTIME_DATA_INTERVAL_DAYS} day group by info"
 
-    # pip install pyarrow, it is quicker using count()
     df = get_data_from_db(table, columns, term)
-    # df = table.to_pandas(split_blocks=False, date_as_object=False)
 
-    data = {
+    cdef dict data = {
         "key": df["info"].tolist(),
         "value": df["count(info)"].tolist()
     }
@@ -284,17 +283,19 @@ cdef list get_relay_displacement(int unit, str event):
     """获取接力器位移, 用于计算曲线拟合度
     event: 1 -> 开, 0 -> 关
     """
-    cdef str table = "timer"
-    cdef str columns = "*"
-    cdef str term = f"where info = 'cv{unit}_{event}' order by time desc limit {Constant.RELAY_DISPLACEMENT_LIMIT}"
+    cdef:
+        str table = "timer"
+        str columns = "*"
+        str term = f"where info = 'cv{unit}_{event}' order by time desc limit {Constant.RELAY_DISPLACEMENT_LIMIT}"
+        
+        list dfs = []
+        int event_code = 1 if event == "open" else 0
 
     df = get_data_from_db(table, columns, term)
     df["start_time"] = df["time"] - pd.to_timedelta(df["val"], unit="s")
 
     table = f"a_cv{unit}_wave_recording"
     columns = "POSITION_SM1, POSITION_SM2, POSITION_SM3, POSITION_SM4, POSITION_SM5, POSITION_SM6"
-    cdef list dfs = []
-    cdef int event_code = 1 if event == "open" else 0
 
     for begin, end in zip(df["start_time"], df["time"]):
         term = f"where type = {event_code} and time >= '{begin}' and time <= '{end}'"
@@ -309,13 +310,6 @@ cdef list get_relay_displacement(int unit, str event):
     return dfs
 
 
-cdef double R2_fun(y_actual, y_ideal) except ? -1:
-    """拟合优度R^2 接近1好"""
-    return 1 - (np.sum((y_actual - y_ideal) ** 2)) / (
-        np.sum((np.mean(y_ideal) - y_ideal) ** 2)
-    )
-
-
 # 用cpdef,否则多线程重定义,bug?
 cpdef double E_fun(
     np.ndarray[np.double_t, ndim=1] y_ideal, 
@@ -325,14 +319,17 @@ cpdef double E_fun(
     double epsilon=Constant.EPSILON
 ) except ? -1:
     """拟合度E, R方改进版
-    引用: https://github.com/jackyrj/myblog/blob/master/%E6%8B%9F%E5%90%88%E5%BA%A6/main.py
+    参考:
+    https://blog.csdn.net/weixin_42028364/article/details/81586621
+    https://github.com/jackyrj/myblog/blob/master/%E6%8B%9F%E5%90%88%E5%BA%A6/main.py
     """
-    cdef double y_mean = np.mean(y_ideal)
-    cdef double z = (
-        (np.sum((np.abs(y_actual - y_ideal)) ** power))
-        / (np.sum((abs(y_ideal - y_mean)) ** power) + epsilon)
-        * k
-    )
+    cdef:
+        double y_mean = np.mean(y_ideal)
+        double z = (
+            (np.sum((np.abs(y_actual - y_ideal)) ** power))
+            / (np.sum((abs(y_ideal - y_mean)) ** power) + epsilon)
+            * k
+        )
     return 1 / (1 + (z) ** (1 / power))
 
 
@@ -349,15 +346,16 @@ cdef goodness_of_fit(int unit, str event):
     """ 拟合度量
     topic -> cv{unit}_fit_{event}: cv1_fit_close
     """
-    cdef list dfs = get_relay_displacement(unit, event)
+    cdef:
+        list dfs = get_relay_displacement(unit, event)
 
-    cdef list E_GOF = []
-    cdef list RMSE = []
-    cdef list KSTest = []
-    cdef list WD = []
+        list E_GOF = []
+        list RMSE = []
+        list KSTest = []
+        list WD = []
 
-    cdef np.ndarray[np.double_t, ndim=1] curve_history
-    cdef np.ndarray[np.double_t, ndim=1] curve_now = dfs[0]
+        np.ndarray[np.double_t, ndim=1] curve_history
+        np.ndarray[np.double_t, ndim=1] curve_now = dfs[0]
     
     with ThreadPoolExecutor(max_workers=Constant.GOF_POOL_NUM) as pool:
         for curve_history in dfs[1:]:
@@ -391,36 +389,35 @@ cdef goodness_of_fit(int unit, str event):
 
 cdef solenoid_valve_overtime1(int unit, begin, end):
     """判断1-6号机电磁阀动作超时(超过1周期)"""
-    cdef str table = f"cv{unit}_digital_0s_" + datetime.today().strftime("%Y%m%d")
-
-    cdef str columns = """time, VAL_102_POS_A, VAL_102_POS_B, VAL_103_POS_A, VAL_103_POS_B, \
+    cdef:
+        str table = f"cv{unit}_digital_0s_" + datetime.today().strftime("%Y%m%d")
+        str columns = """time, VAL_102_POS_A, VAL_102_POS_B, VAL_103_POS_A, VAL_103_POS_B, \
 VAL_105_POS_A, VAL_105_POS_B, VAL_108_POS_A, VAL_108_POS_A, \
 VAL_102_A_CTRLOUT, VAL_102_B_CTRLOUT, VAL_103_A_CTRLOUT, VAL_103_B_CTRLOUT, \
 VAL_105_A_CTRLOUT, VAL_105_B_CTRLOUT, VAL_108_A_CTRLOUT, VAL_108_B_CTRLOUT\
 """
-
-    cdef str term = f"where time >= '{begin - timedelta(seconds=Constant.ACTION_TIME_SV_BEFORE_CV)}' and time <= '{end}'"
+        str term = f"where time >= '{begin - timedelta(seconds=Constant.ACTION_TIME_SV_BEFORE_CV)}' and time <= '{end}'"
+        
+        str posA102 = ""
+        str posB102 = ""
+        str posA103 = ""
+        str posB103 = ""
+        str posA105 = ""
+        str posB105 = ""
+        str posA108 = ""
+        str posB108 = ""
+        str ctrlA102 = ""
+        str ctrlB102 = ""
+        str ctrlA103 = ""
+        str ctrlB103 = ""
+        str ctrlA105 = ""
+        str ctrlB105 = ""
+        str ctrlA108 = ""
+        str ctrlB108 = ""
 
     df = get_data_from_db(table, columns, term)
 
     DBSession = sessionmaker(bind=engine)
-
-    cdef str posA102 = ""
-    cdef str posB102 = ""
-    cdef str posA103 = ""
-    cdef str posB103 = ""
-    cdef str posA105 = ""
-    cdef str posB105 = ""
-    cdef str posA108 = ""
-    cdef str posB108 = ""
-    cdef str ctrlA102 = ""
-    cdef str ctrlB102 = ""
-    cdef str ctrlA103 = ""
-    cdef str ctrlB103 = ""
-    cdef str ctrlA105 = ""
-    cdef str ctrlB105 = ""
-    cdef str ctrlA108 = ""
-    cdef str ctrlB108 = ""
 
     with DBSession() as session:
         for (
@@ -480,24 +477,25 @@ VAL_105_A_CTRLOUT, VAL_105_B_CTRLOUT, VAL_108_A_CTRLOUT, VAL_108_B_CTRLOUT\
         session.commit()
 
 
-cdef solenoid_valve_overtime2(unit, begin, end):
+cdef solenoid_valve_overtime2(int unit, begin, end):
     """判断7-9号机电磁阀动作超时(超过1周期)"""
-    cdef str table = f"cv{unit}_digital_0s_" + datetime.today().strftime("%Y%m%d")
-    cdef str columns = """time, VAL_AA30_A_CTRLOUT, VAL_AA30_B_CTRLOUT, VAL_AA40_CTRLOUT, \
+    cdef:
+        str table = f"cv{unit}_digital_0s_" + datetime.today().strftime("%Y%m%d")
+        str columns = """time, VAL_AA30_A_CTRLOUT, VAL_AA30_B_CTRLOUT, VAL_AA40_CTRLOUT, \
 VAL_AA30_POS_A, VAL_AA30_POS_B, VAL_AA40_POS
 """
-    cdef str term = f"where time >= '{begin - timedelta(seconds=Constant.ACTION_TIME_SV_BEFORE_CV)}' and time <= '{end}'"
+        str term = f"where time >= '{begin - timedelta(seconds=Constant.ACTION_TIME_SV_BEFORE_CV)}' and time <= '{end}'"
+        
+        str posA30 = ""
+        str posB30 = ""
+        str pos40 = ""
+        str ctrlA30 = ""
+        str ctrlB30 = ""
+        str ctrl40 = ""
 
     df = get_data_from_db(table, columns, term)
 
     DBSession = sessionmaker(bind=engine)
-
-    cdef str posA30 = ""
-    cdef str posB30 = ""
-    cdef str pos40 = ""
-    cdef str ctrlA30 = ""
-    cdef str ctrlB30 = ""
-    cdef str ctrl40 = ""
 
     with DBSession() as session:
         for (
@@ -531,15 +529,16 @@ cpdef calculate_pump_run_time(int unit):
     """计算2个泵运行时间"""
     pump_time = timedelta(0)
 
-    cdef str table = f"cv{unit}_digital_0s_" + datetime.today().strftime("%Y%m%d")
-    cdef str columns = "time, PUMP1_CTRLOUT, PUMP2_CTRLOUT"
+    cdef:
+        str table = f"cv{unit}_digital_0s_" + datetime.today().strftime("%Y%m%d")
+        str columns = "time, PUMP1_CTRLOUT, PUMP2_CTRLOUT"
+
+        str pump1 = ""
+        str pump2 = ""
 
     df = get_data_from_db(table, columns)
 
     DBSession = sessionmaker(bind=engine)
-
-    cdef str pump1
-    cdef str pump2
 
     for t, pump1, pump2 in zip(
         df["time"], df["PUMP1_CTRLOUT"], df["PUMP2_CTRLOUT"]
@@ -574,20 +573,20 @@ cpdef calculate_pump_run_time(int unit):
 
 
 cdef get_one_health_df(str table, str term):
-        cdef int hz = (
-            Constant.HEALTH_MS_DATA_SAMPLING_HZ
-            if "0s" in table
-            else Constant.HEALTH_S_DATA_SAMPLING_HZ
-        )
+        cdef:
+            int hz = (
+                Constant.HEALTH_MS_DATA_SAMPLING_HZ
+                if "0s" in table
+                else Constant.HEALTH_S_DATA_SAMPLING_HZ
+            )
+            str columns = "*"
+            str query_sql = (
+                f"select {columns} from (select {columns}, @row := @row + 1 as rownum "
+                + f"from (select @row := 0) r, {table}) ranked {term}"
+            )
 
         # pd.read_sql: use %% as % for python3.9
         term += f" and rownum %% {hz} = 1"
-        cdef str columns = "*"
-
-        cdef str query_sql = (
-            f"select {columns} from (select {columns}, @row := @row + 1 as rownum "
-            + f"from (select @row := 0) r, {table}) ranked {term}"
-        )
 
         df = pd.read_sql_query(sql=query_sql, con=engine)
 
@@ -597,22 +596,25 @@ cdef get_one_health_df(str table, str term):
 
 cdef get_health_df(int unit):
     now = datetime.now()
-    cdef str today = now.strftime("%Y%m%d")
-    cdef str yesterday = (now - timedelta(days=Constant.HEALTH_DATA_INTERVAL_DAYS)).strftime("%Y%m%d")
+    cdef:
+        str today = now.strftime("%Y%m%d")
+        str yesterday = (now - timedelta(days=Constant.HEALTH_DATA_INTERVAL_DAYS)).strftime("%Y%m%d")
 
-    cdef str table1 = f"cv{unit}_digital_0s_" + today
-    cdef str table2 = f"cv{unit}_digital_1s_" + today
-    cdef str table3 = f"cv{unit}_analog_0s_" + today
-    cdef str table4 = f"cv{unit}_analog_1s_" + today
+        str table1 = f"cv{unit}_digital_0s_" + today
+        str table2 = f"cv{unit}_digital_1s_" + today
+        str table3 = f"cv{unit}_analog_0s_" + today
+        str table4 = f"cv{unit}_analog_1s_" + today
 
-    cdef str table5 = f"cv{unit}_digital_0s_" + yesterday
-    cdef str table6 = f"cv{unit}_digital_1s_" + yesterday
-    cdef str table7 = f"cv{unit}_analog_0s_" + yesterday
-    cdef str table8 = f"cv{unit}_analog_1s_" + yesterday
+        str table5 = f"cv{unit}_digital_0s_" + yesterday
+        str table6 = f"cv{unit}_digital_1s_" + yesterday
+        str table7 = f"cv{unit}_analog_0s_" + yesterday
+        str table8 = f"cv{unit}_analog_1s_" + yesterday
 
-    cdef str term_today = f"where time <= now()"
-    cdef str term_yesterday = f"where time >= now() - interval {Constant.HEALTH_DATA_INTERVAL_DAYS} day"
+        str term_today = f"where time <= now()"
+        str term_yesterday = f"where time >= now() - interval {Constant.HEALTH_DATA_INTERVAL_DAYS} day"
     
+        str col
+
     with ThreadPoolExecutor(max_workers=Constant.GET_HEALTH_DF_POOL_NUM) as pool:
         job1 = pool.submit(get_one_health_df, table1, term_today)
         job2 = pool.submit(get_one_health_df, table2, term_today)
@@ -635,8 +637,6 @@ cdef get_health_df(int unit):
     final_df = pd.concat([yesterday_df, today_df])
 
     final_df.fillna(method="ffill", inplace=True)
-
-    cdef str col
 
     for col in final_df.columns:
         if final_df[col].dtype == object:
@@ -661,9 +661,9 @@ cdef double oneway_anova_test(df) except ? -1:
     和turkey test类似,turkey test可以知道两个分组对整体差异的贡献度
     返回差异列的比例
     """
-    cdef int half = df.shape[0] // 2
-
-    cdef np.ndarray[np.double_t, ndim=1] p_value = stats.f_oneway(df.iloc[:half, :], df.iloc[half:, :]).pvalue
+    cdef:
+        int half = df.shape[0] // 2
+        np.ndarray[np.double_t, ndim=1] p_value = stats.f_oneway(df.iloc[:half, :], df.iloc[half:, :]).pvalue
 
     return np.count_nonzero(p_value < 0.05) / df.shape[1]
 
@@ -676,8 +676,9 @@ cdef double grubbs_test(df) except ? -1:
     """
     from outliers import smirnov_grubbs as grubbs
 
-    cdef double x = 0
-    cdef int i
+    cdef:
+        double x = 0
+        int i = 0
 
     for i in range(df.shape[1]):
         x += len(grubbs.two_sided_test_indices(df.iloc[:, i].values, alpha=0.05)) > 0
@@ -685,37 +686,16 @@ cdef double grubbs_test(df) except ? -1:
     return x / df.shape[1]
 
 
-cdef double sos(df) except ? -1:
-    """随机异常值选择, 基于矩阵的关联度, 耗时较长
-    返回异常列的比例
-    """
-    from pyod.models import sos
-
-    clf = sos.SOS(contamination=0.1)
-    cdef int[::1] result = clf.fit_predict(df)
-
-    return np.count_nonzero(result) / df.shape[1]
-
-
 cdef double ecod(df) except ? -1:
     """Unsupervised Outlier Detection Using Empirical Cumulative Distribution Functions
-    经验累计分布函数的无监督离群值检测"""
+    经验累计分布函数的无监督离群值检测
+    """
     from pyod.models import ecod
 
     clf = ecod.ECOD(contamination=0.1)
     cdef long[::1] result = clf.fit_predict(df)
 
     return np.count_nonzero(result) / df.shape[1]
-
-
-cdef double elliptic_envelope(df) except ? -1:
-    """椭圆模型拟合 假设数据服从高斯分布并学习一个椭圆 服务器上耗时长"""
-    from sklearn.covariance import EllipticEnvelope
-
-    clf = EllipticEnvelope(contamination=0.1)
-    cdef np.ndarray[np.int_t, ndim=1] result = clf.fit_predict(df)
-
-    return np.count_nonzero(result == -1) / df.shape[1]
 
 
 cdef double lscp(df) except ? -1:
@@ -739,6 +719,7 @@ cdef double lscp(df) except ? -1:
     ]
     clf = LSCP(contamination=0.1, detector_list=detector_list)
     cdef np.ndarray[np.int_t, ndim=1] result = clf.fit_predict(df)
+
     return np.count_nonzero(result == 1) / df.shape[1]
 
 

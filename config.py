@@ -77,7 +77,7 @@ class Config(object):
     JOBS = [task1_jobs(i) for i in range(1, 10)] + [task2_jobs(i) for i in range(1, 10)]
 
     # https://ascii-generator.site/t/
-    LOG_FILE_START = '''
+    START_LOGO = '''
           _____                    _____                    _____          
          /\    \                  /\    \                  /\    \         
         /::\    \                /::\    \                /::\    \        

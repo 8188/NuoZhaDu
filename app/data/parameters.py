@@ -14,6 +14,11 @@ class Constant(object):
     HEALTH_DATA_INTERVAL_DAYS = 1
     HEALTH_MS_DATA_SAMPLING_HZ = 600
     HEALTH_S_DATA_SAMPLING_HZ = 60
+    GET_HEALTH_DF_POOL_NUM = 8
+    HEALTH_POO_NUM = 6
+    OPEN_CLOSE_POOL_NUM = 4
+    GOF_POOL_NUM = 4
+    API_POOL_NUM = 12
     REDIS_KEYS = [
         "close",
         "open",
@@ -27,9 +32,5 @@ class Constant(object):
         "fit_close",
         "fit_open",
     ]
-    API_POOL_NUM = 12
-    GET_HEALTH_DF_POOL_NUM = 8
-    HEALTH_POO_NUM = 6
-    OPEN_CLOSE_POOL_NUM = 4
-    GOF_POOL_NUM = 4
     MQTT_QUALITY_OF_SERVICE = 1
+    API_OPTIONS = ('cv1', 'cv2', 'cv3', 'cv4', 'cv5', 'cv6', 'cv7', 'cv8', 'cv9')

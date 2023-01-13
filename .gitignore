@@ -8,3 +8,5 @@ build/
 *.ipynb
 *.c
 *.html
+*.lock
+*.pyd

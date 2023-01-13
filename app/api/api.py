@@ -13,7 +13,7 @@ def publish(unit):
         mqtt_client.publish(topic=f"{unit}_{key}", payload=data, qos=Constant.MQTT_QUALITY_OF_SERVICE)
 
 
-@bp.route('/<string:unit>', methods=['GET'])
+@bp.route(f"/<any{Constant.API_OPTIONS}:unit>", methods=["GET"])
 @logger.catch # 需放在@bp下方
 def cylindrical_valves(unit):
     pool.submit(publish, unit) # 实现相同API并发

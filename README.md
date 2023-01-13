@@ -17,7 +17,7 @@ cd app/data
 python setup.py build_ext -i
 ```
 ---
-- Having data, you can start it by one step
+- Having the data, you can start it by one step
 ```
 docker-compose up -d
 ```

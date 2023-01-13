@@ -4,8 +4,6 @@ from app.data.utils import (
     calculate_pump_run_time,
 )
 from app import logger
-import warnings
-warnings.filterwarnings('ignore')
 
 
 @logger.catch
