@@ -1,12 +1,10 @@
-model_new/
 .vscode/
 __pycache__/
 logs/
 .ipynb_checkpoints/
-.VSCodeCounter/
 build/
 *.ipynb
 *.c
 *.html
-*.lock
-*.pyd
+scheduler.lock
+app/data/utils.cp39-win_amd64.pyd
