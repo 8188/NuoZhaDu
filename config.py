@@ -26,7 +26,7 @@ def task2_jobs(num):
         'trigger': 'interval',
         'seconds': 60,
         'jitter': 5,
-        'replace_existing': True, # 对于持久化任务,需要在启动时覆盖已存在的任务
+        'replace_existing': True,
     }
 
 
@@ -34,7 +34,7 @@ class Config(object):
     LOG_FILE_PATH = 'logs/'
     LOG_FILE_NAME = 'NUOZHADU.log'
     LOG_LEVEL = "INFO"
-    LOG_FILE_SIZE = '10 MB' # 1024000
+    LOG_FILE_SIZE = '10 MB'
     LOG_FILE_SUM = 10
 
     user = os.getenv('MYSQL_USER')
