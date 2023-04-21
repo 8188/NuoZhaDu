@@ -3,10 +3,8 @@ from app.data.utils import (
     health,
     calculate_pump_run_time,
 )
-from app import logger
 
 
-@logger.catch
 def task1(unit):
     # 开关机时间计算,   统计
     # 反调次数计算,     统计
@@ -18,7 +16,6 @@ def task1(unit):
     calculate_pump_run_time(unit)
 
 
-@logger.catch
 def task2(unit):
     # 综合打分健康度
     health(unit)

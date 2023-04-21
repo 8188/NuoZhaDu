@@ -32,5 +32,5 @@ class Constant(object):
         "fit_close",
         "fit_open",
     ]
-    MQTT_QUALITY_OF_SERVICE = 1
+    MQTT_QUALITY_OF_SERVICE = 0
     API_OPTIONS = ('cv1', 'cv2', 'cv3', 'cv4', 'cv5', 'cv6', 'cv7', 'cv8', 'cv9')

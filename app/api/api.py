@@ -1,12 +1,13 @@
+from flask.json import jsonify
 from app.api import bp
-from app import mqtt_client, redis_client, logger
+from app import mqtt_client, redis_client
 from app.data.parameters import Constant
 from concurrent.futures import ThreadPoolExecutor
 
 
 pool = ThreadPoolExecutor(max_workers=Constant.API_POOL_NUM)
 
-@logger.catch
+
 def publish(unit):
     for key in Constant.REDIS_KEYS:
         data = redis_client.hget(unit, key)
@@ -14,7 +15,6 @@ def publish(unit):
 
 
 @bp.route(f"/<any{Constant.API_OPTIONS}:unit>", methods=["GET"])
-@logger.catch # 需放在@bp下方
 def cylindrical_valves(unit):
     pool.submit(publish, unit) # 实现相同API并发
-    return "OK"
+    return jsonify("OK")

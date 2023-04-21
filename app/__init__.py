@@ -5,10 +5,12 @@ from flask_apscheduler import APScheduler as _BaseAPScheduler
 from sqlalchemy import create_engine
 from flask_redis import FlaskRedis
 from flask_cors import CORS
-from loguru import logger
+import logging
+from logging.handlers import RotatingFileHandler
 import os
 import warnings
 warnings.filterwarnings("ignore")
+import time
 
 
 # 重写APScheduler,如果不重写APScheduler类,则定时任务函数涉及上下文操作时,app必须与定时任务函数在一个模块内
@@ -72,6 +74,21 @@ mqtt_client = Mqtt()
 engine = create_engine(Config.MYSQL_DATABASE_URI)
 redis_client = FlaskRedis()
 cors = CORS()
+logger = logging.getLogger('my_logger')
+
+
+@mqtt_client.on_disconnect()
+def handle_disconnect():
+    logger.info("MQTT disconnected")
+    
+    rc = 1
+    while rc != 0:
+        try:
+            rc = mqtt_client.client.reconnect()
+            logger.info("Reconnected to MQTT broker")
+        except:
+            logger.info("Failed to reconnect to MQTT broker")
+            time.sleep(5)
 
 
 def create_app():
@@ -93,12 +110,18 @@ def create_app():
         if not os.path.exists(Config.LOG_FILE_PATH):
             os.mkdir(Config.LOG_FILE_PATH)
 
-        logger.add(
-            Config.LOG_FILE_PATH + Config.LOG_FILE_NAME,
-            level=Config.LOG_LEVEL,
-            rotation=Config.LOG_FILE_SIZE,
-            retention=Config.LOG_FILE_SUM
+        file_handler = RotatingFileHandler(
+            Config.LOG_FILE_PATH + Config.LOG_FILE_NAME, 
+            maxBytes=Config.LOG_FILE_SIZE,
+            backupCount=Config.LOG_FILE_SUM
         )
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+        ))
+        file_handler.setLevel(logging.INFO)
+        logger.addHandler(file_handler)
+
+        logger.setLevel(logging.INFO)
 
         print(Config.START_LOGO)
         logger.info("NUOZHADU MICROSERVER START")

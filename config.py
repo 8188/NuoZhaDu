@@ -24,8 +24,8 @@ def task2_jobs(num):
         'func': 'app.data.tasks:task2', 
         'args': (num,), 
         'trigger': 'interval',
-        'seconds': 60,
-        'jitter': 5,
+        'seconds': 100,
+        'jitter': 10,
         'replace_existing': True,
     }
 
@@ -34,7 +34,7 @@ class Config(object):
     LOG_FILE_PATH = 'logs/'
     LOG_FILE_NAME = 'NUOZHADU.log'
     LOG_LEVEL = "INFO"
-    LOG_FILE_SIZE = '10 MB'
+    LOG_FILE_SIZE = 10240
     LOG_FILE_SUM = 10
 
     user = os.getenv('MYSQL_USER')
@@ -55,7 +55,7 @@ class Config(object):
     MQTT_BROKER_PORT = int(os.getenv('MQTT_BROKER_PORT'))
     MQTT_USERNAME = os.getenv('MQTT_USERNAME')
     MQTT_PASSWORD = os.getenv('MQTT_PASSWORD')
-    MQTT_KEEPALIVE = 5
+    MQTT_KEEPALIVE = 10
     MQTT_TLS_ENABLED = False
 
     WSGI_HOST = os.getenv('WEB_SERVER_GATEWAY_INTERFACE_HOST')
@@ -75,6 +75,7 @@ class Config(object):
     SCHEDULER_JOB_DEFAULTS = {'coalesce': True, 'max_instances': 9, 'misfire_grace_time': 5}
     SCHEDULER_TIMEZONE = os.getenv('TIMEZONE')
     JOBS = [task1_jobs(i) for i in range(1, 10)] + [task2_jobs(i) for i in range(1, 10)]
+    # JOBS = [task2_jobs(i) for i in range(1, 10)] # for test
 
     # https://ascii-generator.site/t/
     START_LOGO = '''
