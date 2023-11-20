@@ -573,28 +573,21 @@ cpdef calculate_pump_run_time(int unit):
 
 
 cdef get_one_health_df(str table, str term):
-    cdef int hz = (
-        Constant.HEALTH_MS_DATA_SAMPLING_HZ
+    cdef int sr = (
+        Constant.HEALTH_MS_DATA_SAMPLE_RATE
         if "0s" in table
-        else Constant.HEALTH_S_DATA_SAMPLING_HZ
+        else Constant.HEALTH_S_DATA_SAMPLE_RATE
     )
-
-    # pd.read_sql: use %% as % for python3.9
-    term += f" and rownum %% {hz} = 1"
 
     cdef:
         str columns = "*"
-        str query_sql = (
-            f"select {columns} from (select {columns}, @row := @row + 1 as rownum "
-            + f"from (select @row := 0) r, {table}) ranked {term}"
-        )
-
-
+        str query_sql = f"select {columns} from {table} {term}"
 
     df = pd.read_sql_query(sql=query_sql, con=engine)
+    df = df.groupby(df.index // sr).mean()
+    # print(table, df.shape)
 
-    # "2:-1" remove the column @row := 0, time, rownum
-    return df.iloc[:, 2:-1]
+    return df.iloc[:, 1:]
 
 
 cdef get_health_df(int unit):
@@ -613,28 +606,28 @@ cdef get_health_df(int unit):
         str table7 = f"cv{unit}_analog_0s_" + yesterday
         str table8 = f"cv{unit}_analog_1s_" + yesterday
 
-        str term_today = f"where time <= now()"
-        str term_yesterday = f"where time >= now() - interval {Constant.HEALTH_DATA_INTERVAL_DAYS} day"
+        str term_today = f"where time >= now() - interval {Constant.HEALTH_DATA_INTERVAL_HOURS} hour"
+        str term_yesterday = f"where time >= now() - interval {Constant.HEALTH_DATA_INTERVAL_HOURS} hour"
     
         str col
 
     with ThreadPoolExecutor(max_workers=Constant.GET_HEALTH_DF_POOL_NUM) as pool:
-        job1 = pool.submit(get_one_health_df, table1, term_today)
-        job2 = pool.submit(get_one_health_df, table2, term_today)
+        # job1 = pool.submit(get_one_health_df, table1, term_today)
+        # job2 = pool.submit(get_one_health_df, table2, term_today)
         job3 = pool.submit(get_one_health_df, table3, term_today)
         job4 = pool.submit(get_one_health_df, table4, term_today)
-        job5 = pool.submit(get_one_health_df, table5, term_yesterday)
-        job6 = pool.submit(get_one_health_df, table6, term_yesterday)
+        # job5 = pool.submit(get_one_health_df, table5, term_yesterday)
+        # job6 = pool.submit(get_one_health_df, table6, term_yesterday)
         job7 = pool.submit(get_one_health_df, table7, term_yesterday)
         job8 = pool.submit(get_one_health_df, table8, term_yesterday)
 
     today_df = reduce(
         lambda left, right: left.join(right), 
-        [job1.result(),job2.result(),job3.result(),job4.result()]
+        [job3.result(),job4.result()]
     )
     yesterday_df = reduce(
         lambda left, right: left.join(right), 
-        [job5.result(),job6.result(),job7.result(),job8.result()]
+        [job7.result(),job8.result()]
     )
 
     final_df = pd.concat([yesterday_df, today_df])
@@ -712,13 +705,13 @@ cdef double lscp(df) except ? -1:
     返回异常列的比例
     """
     from pyod.models.lscp import LSCP
-    from pyod.models import lof, cof, inne, pca, ocsvm
+    from pyod.models import lof, cof, inne, ocsvm
 
     cdef list detector_list = [
         lof.LOF(),
         cof.COF(),
         inne.INNE(),
-        pca.PCA(),
+        # pca.PCA(),
         ocsvm.OCSVM(),
     ]
     clf = LSCP(contamination=0.1, detector_list=detector_list)
@@ -733,7 +726,8 @@ cdef double spectral_residual_saliency(df) except ? -1:
     """
     import sranodec as anom
 
-    spec = anom.Silency(amp_window_size=24, series_window_size=24, score_window_size=100)
+    cdef int score_window_size = min(df.shape[0], 100)
+    spec = anom.Silency(amp_window_size=24, series_window_size=24, score_window_size=score_window_size)
 
     cdef int abnormal = 0
     for i in range(df.shape[1]):
@@ -744,10 +738,10 @@ cdef double spectral_residual_saliency(df) except ? -1:
 
 
 cpdef health(int unit):
-    # from time import time
-    # time1 = time()
+    from time import time
+    time1 = time()
     df = get_health_df(unit)
-    # df = pd.read_csv("/app/data/test/final_df.csv") # for test
+    # df = pd.read_csv("./app/data/test/final_df.csv") # for test
     # print("df shape: ", df.shape)
     if len(df) == 0:
         logger.info(f"Get No Datum From Unit{unit}")
@@ -763,41 +757,21 @@ cpdef health(int unit):
         double lscp_result = 0.0
         double sr = 0.0
 
-    # with ThreadPoolExecutor(max_workers=Constant.HEALTH_POO_NUM) as pool:
-    #     job1 = pool.submit(zscore_test, df)
-    #     job2 = pool.submit(oneway_anova_test, df)
-    #     job3 = pool.submit(grubbs_test, df)
-    #     job4 = pool.submit(ecod, df)
-    #     job5 = pool.submit(lscp, df)
-    #     job6 = pool.submit(spectral_residual_saliency, df)
+    with ThreadPoolExecutor(max_workers=Constant.HEALTH_POO_NUM) as pool:
+        job1 = pool.submit(zscore_test, df)
+        job2 = pool.submit(oneway_anova_test, df)
+        job3 = pool.submit(grubbs_test, df)
+        job4 = pool.submit(ecod, df)
+        job5 = pool.submit(lscp, df)
+        job6 = pool.submit(spectral_residual_saliency, df)
 
-    #     zscore = job1.result()
-    #     f_oneway = job2.result()
-    #     grubbs = job3.result()
-    #     ecod_result = job4.result()
-    #     lscp_result = job5.result()
-    #     sr = job6.result()
+        zscore = job1.result()
+        f_oneway = job2.result()
+        grubbs = job3.result()
+        ecod_result = job4.result()
+        lscp_result = job5.result()
+        sr = job6.result()
     
-    zscore = zscore_test(df)
-    # t1 = time()
-    # print("zscore: ", t1 - time1)
-    f_oneway = oneway_anova_test(df)
-    # t2 = time()
-    # print("f_oneway: ", t2 - t1)
-    grubbs = grubbs_test(df)
-    # t3 = time()
-    # print("grubbs ", t3 - t2)
-    ecod_result = ecod(df)
-    # t4 = time()
-    # print("ecod: ", t4 - t3)
-    # ee = elliptic_envelope(df)
-    lscp_result = lscp(df)
-    # t5 = time()
-    # print("lscp: ", t5 - t4)
-    sr = spectral_residual_saliency(df)
-    # t6 = time()
-    # print("sr: ", t6 - t5)
-
     cdef dict data = {
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
         "key": ["标准分数", "单因素方差分析", "Grubbs检验", "ECOD检测", "LSCP检测", "残差谱分析"],
@@ -806,4 +780,4 @@ cpdef health(int unit):
     
     redis_client.hset(f"cv{unit}", "health", json.dumps(data, ensure_ascii=False))
 
-    # print(time() - time1)
+    print("total time: ", time() - time1)
